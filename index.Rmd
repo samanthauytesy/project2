@@ -46,93 +46,252 @@ class_diag <- function(score, truth, positive, cutoff=.5){
 
 # Mining, Classification, Prediction
 
-## Name and EID here
+## Samantha Uy Tesy SAU275
 
 ### Introduction 
 
-Paragraph or two introducing your datasets and variables, why they are interesting to you, etc. See instructions for more information
+Can we develop a model that can accurately determine whether a patient has diabetes based on particular medical variables? According to the National Institute of Diabetes and Digestive and Kidney Diseases, over 9.4% of the United States population has diabetes, with "more than 1 in 4 [individuals]" not knowing they have diabetes. This dataset, which was pulled from Kaggle, has data over 768 female patients aged 21 or older with various medical variables including a variable that describes whether or not the patient is diabetic. (Source: https://www.niddk.nih.gov/health-information/diabetes/overview/what-is-diabetes)
+
+The first variable `Pregnancies` counts the number of times the patient has been pregnant, `Glucose` measures the patient's concentration of glucose present in plasma after a glucose tolerance test, `BloodPressue` measures the patient's diastolic blood pressure, `SkinThickness` measures the patient's tricep skin fold thickness (in mm), `Insulin` measures the patient's 2-Hour serum insulin (in U/ml), `BMI` measures the patient's body mass index (weight kg/height m^2), `DiabetesPedigreeFunction` is a diabetes function for the patient, `Age` is age of the patient measured in years, and `Outcome` is a boolean variable [1 or 0] that classifies whether the patient has diabetes [1] or not [0].
 
 ```{R}
+### Read Dataset and required libraries
 library(tidyverse)
-# read your datasets in here, e.g., with read_csv()
+library(cluster)
+library(GGally)
+library(caret)
+library(rpart)
+library(rpart.plot)
 
-# if your dataset needs tidying, do so here
+# hyperlink to dataset
+###https://www.kaggle.com/mathchi/diabetes-data-set?select=diabetes.csv
+
+diabetes <- read_csv("diabetes.csv")
+
+diabetes <- diabetes %>% na.omit()
 
 # any other code here
+head(diabetes)
 ```
 
-### Cluster Analysis
+### Cluster Analysis 
 
 ```{R}
-library(cluster)
-# clustering code here
+### Cluster Analysis
+
+# Silhouette analysis, pick 2 clusters based on graph
+sil_width<-vector() #empty vector to hold mean sil width
+for(i in 2:10){  
+  kms <- kmeans(diabetes,centers=i) #compute k-means solution for each k
+  sil <- silhouette(kms$cluster,dist(diabetes)) #get sil widths
+  sil_width[i]<-mean(sil[,3]) #take averages (higher is better)
+}
+ggplot()+geom_line(aes(x=1:10,y=sil_width))+scale_x_continuous(name="k",breaks=1:10)
+
+
+# PAM clustering algorithm
+diabetes_pam <- diabetes %>% scale() %>% pam(k=2)
+
+# Representatives for medoids
+diabetes%>%slice(diabetes_pam$id.med)
+
+plot(diabetes_pam,which=2)
+
+pamclust<-diabetes %>% mutate(cluster=as.factor(diabetes_pam$clustering))
 ```
 
-Discussion of clustering here
+The goodness of fit scored a 0.2, which means that no substantial structure was found. Furthermore, The two patients in the table above are representatives of their clusters. In terms of their original variables, Cluster 1 tends to have higher `Glucose` and `Insulin`. 
     
-    
+#Pairwise Cluster
+```{r}
+diabetes1 <- diabetes %>%
+  mutate(cluster = as.factor(diabetes_pam$clustering))
+
+ggpairs(diabetes1, columns=1:6, aes(color=cluster))
+
+```
+
+Looking at the pairwise plots, the most distinct difference between Cluster 1 and Cluster 2 is in `Glucose` Level. Cluster 1's distribution is to the right of Cluster 2, indicating that that group has a higher mean value for `Glucose`. Although less significant in shift, Cluster 1 also has a slightly higher BMI which is consistent with other studies pertaining to indicators of diabetes. Interestingly, Cluster 1 has on average more pregnancies than Cluster 2. Furthermore, the two variables with the highest correlation are the `SkinThickness` and `Insulin` variables. According to a study by the American Diabetes association, there is a statistically significant relationship between skin thickness (determined by collagen content) and higher levels of insulin. Source(https://care.diabetesjournals.org/content/12/5/309)
+
 ### Dimensionality Reduction with PCA
 
 ```{R}
-# PCA code here
+### Principal Component Analysis
+princomp(na.omit(diabetes), cor=T) -> pca1
+summary(pca1, loadings = T)
+
+# Plot PCA
+pca_plot_data <- pca1$scores %>%
+  data.frame(general = diabetes$Glucose, PC1 = pca1$scores[,1], PC2 = pca1$scores[,2])
+
+ggplot(pca_plot_data, aes(PC1, PC2)) + geom_point(aes(color=diabetes$Glucose)) + theme_minimal()
 ```
 
-Discussions of PCA here. 
+The components that can fairly explain most of the variance (i.e. >85%) make up a total of 6 components: PC1 through PC6.
+
+1. `PC1` is positive for all variables, indicating that if an patient scores high on `PC1`, they tend to have a high score for all 9 variables in this dataset, since they are correlated positively. Conversely, if an individual scores low on `PC1`, they tend to have a low score for all 9 variables.
+2. `PC2` is negative for `SkinThickness`, `Insulin`, `BMI`, and `DiabetesPedigreeFunction`, thus if you score high on `PC2` you tend to score low on those variables, but high on `Age`, and `Pregnancies`, and vice versa if you score low on `PC2`. 
+3. `PC3` is negative for `Glucose`, `Insulin`, and `DiabetesPedigreeFunction`, thus if you score high on `PC3` you tend to score low on those variables, but high on all other variables.
+4. `PC4` is negative for `BMI` and `Glucose`, thus if you score high on `PC4` you tend to score low on those variables, but high on `Pregnancies`, `Age`, and `DiabetesPedigreeFunction`. 
+5. `PC5` is negative for `BMI` and `DiabetesPedigreeFunction`, thus if you score high on `PC5` you tend to score low on those variables, but high on `Pregnancies`, `Glucose`, `SkinThickness`, and `Insulin`. 
+6. `PC6` is negative for `Glucose`, `BloodPressure`, and `DiabetesPedigreeFunction`, thus if you score high on `PC6` you tend to score low on those variables, but high on `Pregnancies`, `Skin Thickness` and `BMI`. 
+
+
+Furthermore, as seen on the plot, patients that scored high on `PC1` tended to have a higher score for the `Glucose` variable (indicated by lighter blue dots). Thus, `PC1` is positively correlated with glucose level. 
 
 ###  Linear Classifier
 
 ```{R}
-# linear classifier code here
+### Logistic Classification using entire data set to train
+logistic_fit <- glm(Outcome ~ ., data=diabetes, family="binomial")
+score <- predict(logistic_fit)
+
+class_diag(score,truth=diabetes$Outcome, positive=1)
 ```
+
+Using the entire dataset to train the model, we get an AUC of 83.94%, which is a single measure to quantify how well the model is performing in terms of prediction, overall. This AUC scores "Good".
 
 ```{R}
-# cross-validation of linear classifier here
+### K-fold Cross Validation of Logistic Regression
+set.seed(2)
+
+# omit NAs
+diabetes1<-diabetes %>% na.omit()
+
+k=10 #choose number of folds
+
+data<-diabetes1[sample(nrow(diabetes1)),] #randomly order rows
+folds<-cut(seq(1:nrow(diabetes1)),breaks=k,labels=F) #create 10 folds
+
+diags<-NULL
+for(i in 1:k){
+  ## Create training and test sets
+  train<-data[folds!=i,] 
+  test<-data[folds==i,]
+  truth<-test$Outcome
+  
+  ## Train model on training set
+  fit<-glm(Outcome~.,data=train,family="binomial")
+  probs<-predict(fit,newdata = test,type="response")
+  
+  ## Test model on test set (save all k results)
+  diags<-rbind(diags,class_diag(probs,truth,positive=1))
+}
+
+summarize_all(diags,mean)
 ```
 
-Discussion here
+Using a k-Fold cross validation procedure, we separate the data into 10 segments, randomizing the rows to account for any possible pattern in the data, then we train and test the model on each of the folds, and then take the mean of all 10 folds. This procedure produced an AUC of 82.9%, which is only slightly less than in the original logistic fit (1%); therefore, the model likely does not suffer from overfitting.
 
 ### Non-Parametric Classifier
 
 ```{R}
-library(caret)
-# non-parametric classifier code here
+### Non-parametric Classifier- k-Nearest Neighbors
+
+# Fit k-Nearnest Neighbors model
+knn_fit <- knn3(Outcome~ ., data=diabetes1, k=5)
+y_hat_knn <- predict(knn_fit,diabetes)
+
+
+class_diag(y_hat_knn[,2],diabetes1$Outcome, positive=1)
+
 ```
+Using k-Nearest Neighbors to classify this data set, we have an AUC of 87.19, which is "Good".
 
 ```{R}
-# cross-validation of np classifier here
+# k-Folds Cross-validation of k-Nearest Neighbors 
+set.seed(2)
+k=10 #choose number of folds
+
+data<- diabetes1[sample(nrow(diabetes1)),] #randomly order rows
+folds<-cut(seq(1:nrow(diabetes1)),breaks=k,labels=F) #create folds
+
+diags<-NULL
+for(i in 1:k){
+  ## Create training and test sets
+  train<-data[folds!=i,] 
+  test<-data[folds==i,]
+  truth<-test$Outcome ## Truth labels for fold i
+  
+  ## Train model on training set (all but fold i)
+  fit<-knn3(Outcome~.,data=train)
+  
+  ## Test model on test set (fold i) 
+  probs<-predict(fit,newdata = test)[,2]
+  
+  ## Get diagnostics for fold i
+  diags<-rbind(diags,class_diag(probs,truth, positive=1))
+}
+
+summarize_all(diags,mean)
+
 ```
 
-Discussion
+Using a k-Fold cross validation procedure, I produced an AUC of 75.3%, which is a much lower number than in the original knn3 fit (~12% less); therefore, the model suffers from overfitting. Furthermore, compared to our logistic fit and its subsequent k-Fold cross-validation, the K-Nearest Neighbors model performed objectively worse in terms of AUC (8.2% worse).
 
 
 ### Regression/Numeric Prediction
 
 ```{R}
-# regression model code here
+### Regression Tree
+# Refactor data for easier interpretation
+diabetes2 <- diabetes1 %>%
+      mutate(Outcome = ifelse(Outcome == 1,"Diabetic","Not"))
+
+# Fit regression and prune
+reg_fit <- train(Glucose ~ ., data=diabetes1, method="rpart")
+rpart.plot(reg_fit$finalModel,digits=4)
+
+# Calculate MSE overall
+y_hat_reg<-predict(reg_fit)
+mean((diabetes1$Glucose-y_hat_reg)^2) 
+
 ```
+The average value for `Glucose` across the whole dataset is 120.9. The first node separates those who have diabetes and those who do not. Of those who do have diabetes (Outcome does not equal 0), their average glucose level was 141.3. Of those who do not have diabetes (Outcome equals zero), the average glucose level is 110. The second node compares `Insulin`; for those who had an insulin level less than 126, their average glucose level is 105.4. For those who have an insulin level greater than 126, their average glucose level is 129.2.
+
+This model chooses splits to reduce the mean squared error (MSE), which is 740.9.
 
 ```{R}
-# cross-validation of regression model here
+# Regression Tree Cross Validation
+set.seed(2)
+cv_tree <- trainControl(method="cv", number = 5, classProbs = T, savePredictions = T)
+fit <- train(Glucose ~ ., data=diabetes1, trControl=cv_tree, method="rpart")
+
+# Calculate MSE from CV
+min(fit$results$RMSE)^2
+
 ```
 
-Discussion
+The MSE after cross-validating is 743.4, which is a relatively small difference (2.5 increase in MSE). Thus, the model does not appear to suffer from overfitting.
 
 ### Python 
 
 ```{R}
 library(reticulate)
+
+# select python3 version
+use_python("/usr/bin/python3")
+
+x <- 6
+class(x)
+
 ```
 
 ```{python}
 # python code here
+
+y = 2
+
+#access R-defined objects with r
+print(r.x*y) 
+print(type(r.x))
+
 ```
 
-Discussion
+In the R code chunk, we loaded the reticulate library so that variables can be shared between the R and Python environments. In the R code chunk, I assigned the number 6 to x. In the Python code chunk, I assigned the number 2 to y. I used the python `print()` function to multiply the two variables together, identifying that x is an R variable with `r.x`. And in fact, 2 times 6 equals 12. Furthermore, the variable was converted to a float, when it was originally numeric when it was assigned in R. 
 
 ### Concluding Remarks
 
-Include concluding remarks here, if any
-
-
+In conclusion, `Glucose` is a decent measure that can be used to classify whether or not a patient is diabetic. However, the models are improved when using multiple variables to classify whether or not a patient is diabetic. 
 
 
